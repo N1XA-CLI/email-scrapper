@@ -20,25 +20,31 @@ def get_args():
 
     return args.domain, args.limit
 
-
-def is_visited(url) -> bool:
+def is_visited(url, visited_links) -> bool:
     """Returns True if url is already visited else returns False."""
-    if url in visited_site:
-        return True
-    return False
+    return url in visited_links
 
-# https://mas.bg.ac.rs/ # Site to test
-session = requests.Session()
-session.headers.update({
-    "User-Agent": "Mozilla/5.0"
-})
+def parse_email(found_email):
 
-def scrap(url, scrape_links = False) -> None:
+    if not found_email:
+        print("[-] No Email Found")
+        print("[-] Exiting...")
+        sys.exit(0)
+    
+    print("\n[+] Found Email")
+    for email in found_email:
+        print(email)
+
+def scrap(session, base_domain, email_coll, links_coll, url) -> None:
 
     try:
         print(f"\r\033[K[+] Scrapping from: {url}", flush=True, end="")
 
         r = session.get(url=url, timeout=5)
+
+        if r.headers['Content-Type'] != "text/html":
+            return
+        
         r.raise_for_status()
 
         html_data = BeautifulSoup(r.text, "html.parser")
@@ -61,17 +67,14 @@ def scrap(url, scrape_links = False) -> None:
 
                 if parsed.scheme in {"http", "https"}:
                     file = parsed.path.split(".")[-1].lower()
-                    if file in exclude_filetype:
+                    cleaned_url = parsed.scheme + "://" + parsed.netloc + parsed.path
+                    if cleaned_url in links_coll:
                         continue
-                    if scrape_links:
-                        cleaned_url = parsed.scheme + "://" + parsed.netloc + parsed.path
-                        if cleaned_url in scrapped_links:
-                            continue
-                        scrapped_links.append(cleaned_url)
+                    links_coll.append(cleaned_url)
 
         # Extract all the Email from the page
         raw_emails = re.findall(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", r.text)
-        scrapped_emails.update(raw_emails)
+        email_coll.update(raw_emails)
 
     except requests.RequestException as e:
         print("\r\033[k", end="", flush=True)
@@ -79,48 +82,38 @@ def scrap(url, scrape_links = False) -> None:
         return
     
     except KeyboardInterrupt:
-        print()
-        if scrapped_emails:
-            print("[+] Found Email")
-            print(*scrapped_emails, sep="\n")
-        else:
-            print("[-] No Email Found")
+        parse_email(found_email=email_coll)
         sys.exit(0)
 
+def run():
 
-domain, limit = get_args()
+    domain, limit = get_args() # Gets the argument
 
-base_domain = urlparse(domain).netloc
-exclude_filetype = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp", "mp3", "wav", "ogg", "flac", "aac", "m4a", "mp4", "mkv", "avi", "mov", "webm", "wmv", "mpeg", "mpg", "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "exe", "msi", "apk", "deb", "rpm", "dmg", "pkg", "appimage", "iso", "img", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "csv", "ttf", "otf", "woff", "woff2", "dll", "so", "bin", "jar", "class", "pyc"}
+    base_domain = urlparse(domain).netloc
+    
+    scrapped_emails = set()
+    scrapped_links = deque()
+    visited_site = deque()
 
-scrapped_emails = set()
-scrapped_links = deque()
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0"
+    })
 
-visited_site = deque()
+    scrap(domain)
+    visited_site.append(domain)
 
-# Extract links and emails form the site.
-scrap(domain, scrape_links=True)
+    while scrapped_links and len(visited_site) < limit:
+        current_link = scrapped_links.pop()
 
-visited_site.append(domain)
+        if is_visited(current_link):
+            continue
 
-while scrapped_links and len(visited_site) < limit:
-    current_link = scrapped_links.pop()
+        visited_site.append(current_link)
+        scrap(session, base_domain, scrapped_emails, scrapped_links, current_link)
 
-    if is_visited(current_link):
-        continue
+    print(f"\n[+] Scrapped {len(visited_site)} site")
+    parse_email(found_email=scrapped_emails)
 
-    visited_site.append(current_link)
-
-    scrap(current_link, scrape_links=True)
-
-print()
-print(f"[+] Scrapped {len(visited_site)} site")
-
-print(f"[+] Scrapped {len(scrapped_emails)} email")
-
-if scrapped_emails:
-    print("[+] Found Email")
-    print(*scrapped_emails, sep="\n")
-else:
-    print("[-] No Email Found")
-
+if __name__ == "__main__":
+    run()
