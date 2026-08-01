@@ -1,73 +1,113 @@
 #!/usr/bin/env python3
 
 import argparse
-import requests
 from bs4 import BeautifulSoup
+import requests
 import re
 from urllib.parse import urljoin, urlparse
 from collections import deque
 import sys
+import threading
+from termcolor import colored 
 
 class EmailScrapper():
 
-    def is_visited(self, url, visited_links) -> bool:
+    def __init__(self):
+        
+        self.left_links = deque() # Store, extracted links and links left to scrap
+        self.scrapped_emails = set() # Stores extracted email
+        self.visited_site = set() # Stores scrapped site 
+
+    def intro(self):
+        logo = """
+▓█████  ███▄ ▄███▓ ▄▄▄       ██▓ ██▓         ██████  ▄████▄   ██▀███   ▄▄▄       ██▓███   ██▓███  ▓█████  ██▀███  
+▓█   ▀ ▓██▒▀█▀ ██▒▒████▄    ▓██▒▓██▒       ▒██    ▒ ▒██▀ ▀█  ▓██ ▒ ██▒▒████▄    ▓██░  ██▒▓██░  ██▒▓█   ▀ ▓██ ▒ ██▒
+▒███   ▓██    ▓██░▒██  ▀█▄  ▒██▒▒██░       ░ ▓██▄   ▒▓█    ▄ ▓██ ░▄█ ▒▒██  ▀█▄  ▓██░ ██▓▒▓██░ ██▓▒▒███   ▓██ ░▄█ ▒
+▒▓█  ▄ ▒██    ▒██ ░██▄▄▄▄██ ░██░▒██░         ▒   ██▒▒▓▓▄ ▄██▒▒██▀▀█▄  ░██▄▄▄▄██ ▒██▄█▓▒ ▒▒██▄█▓▒ ▒▒▓█  ▄ ▒██▀▀█▄  
+░▒████▒▒██▒   ░██▒ ▓█   ▓██▒░██░░██████▒   ▒██████▒▒▒ ▓███▀ ░░██▓ ▒██▒ ▓█   ▓██▒▒██▒ ░  ░▒██▒ ░  ░░▒████▒░██▓ ▒██▒
+░░ ▒░ ░░ ▒░   ░  ░ ▒▒   ▓▒█░░▓  ░ ▒░▓  ░   ▒ ▒▓▒ ▒ ░░ ░▒ ▒  ░░ ▒▓ ░▒▓░ ▒▒   ▓▒█░▒▓▒░ ░  ░▒▓▒░ ░  ░░░ ▒░ ░░ ▒▓ ░▒▓░
+ ░ ░  ░░  ░      ░  ▒   ▒▒ ░ ▒ ░░ ░ ▒  ░   ░ ░▒  ░ ░  ░  ▒     ░▒ ░ ▒░  ▒   ▒▒ ░░▒ ░     ░▒ ░      ░ ░  ░  ░▒ ░ ▒░
+   ░   ░      ░     ░   ▒    ▒ ░  ░ ░      ░  ░  ░  ░          ░░   ░   ░   ▒   ░░       ░░          ░     ░░   ░ 
+   ░  ░       ░         ░  ░ ░      ░  ░         ░  ░ ░         ░           ░  ░                     ░  ░   ░     
+                                                    ░         ~ N1XA-CLI
+                                                    """
+        
+        print(colored(logo, 'red'))
+        
+
+    def is_visited(self, url) -> bool:
         """Returns True if url is already visited else returns False."""
-        return url in visited_links
+
+        return url in self.visited_site
+    
+    def ext_emails(self, data):
+        """Takes data as text and returns list of emails."""
+
+        return re.findall(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", data)
 
     def parse_email(self, found_email):
 
         if not found_email:
-            print("[-] No Email Found")
-            print("[-] Exiting...")
+            print(colored("[-] No Email Found", 'red'))
+            print(colored("[-] Exiting...", 'red'))
             sys.exit(0)
         
-        print("\n[+] Found Email")
+        print(colored(f"[+] Found {len(found_email)} Email", 'green'))
+
         for email in found_email:
             print(email)
 
-    def scrap(self, session, base_domain, email_coll, links_coll, url) -> None:
+    def write_to(self, filename, emails) -> None:
+
+        print(colored(f"[+] Writing to {filename}", 'yellow'))
+
+        with open(filename, "w") as f:
+            for email in emails:
+                f.write(f"{email}\n")
+        
+
+    def scrap(self, session, base_domain, email_coll, url) -> None:
+        """Takes session, basedomain, a set of email and link"""
 
         try:
-            print(f"\r\033[K[+] Scrapping from: {url}", flush=True, end="")
+            print(colored(f"\r\033[K[+] Scrapping from: {url}", 'green'), flush=True, end="")
 
-            r = session.get(url=url, timeout=5)
-
-            if r.headers['Content-Type'] != "text/html":
-                return
-            
+            r = session.get(url=url, timeout=2)
             r.raise_for_status()
 
-            html_data = BeautifulSoup(r.text, "html.parser")
+            try:
+                if (r.headers.get('Content-Type')).split(';')[0] != "text/html":
+                    return
+            except requests.RequestException:
+                print(colored(f"\n[-] Cannot extract from {url}", 'on_red'))
 
+            html_data = BeautifulSoup(r.text, "html.parser")
             links = html_data.find_all("a")
 
             if not links:
-                print(f"[!] Cannot get link from {url}")
                 return
-
-            # Extract all the links from the page
+            
             for link in links:
                 href = link.get("href")
                 if href:
                     parsed = urlparse(urljoin(url, href))
 
-                    # Checks if the domain is same or not!
                     if parsed.netloc != base_domain:
                         continue
 
                     if parsed.scheme in {"http", "https"}:
-                        file = parsed.path.split(".")[-1].lower()
-                        cleaned_url = parsed.scheme + "://" + parsed.netloc + parsed.path
-                        if cleaned_url in links_coll:
-                            continue
-                        links_coll.append(cleaned_url)
 
-            # Extract all the Email from the page
-            raw_emails = re.findall(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", r.text)
-            email_coll.update(raw_emails)
+                        cleaned_url = parsed.scheme + "://" + parsed.netloc + parsed.path
+
+                        if cleaned_url in self.left_links:
+                            continue
+
+                        self.left_links.append(cleaned_url)
+
+            email_coll.update(self.ext_emails(r.text))
 
         except requests.RequestException as e:
-            print("\r\033[k", end="", flush=True)
+            print("\r\033[K", end="", flush=True)
             print(f"\n[!] {e}")
             return
         
@@ -75,44 +115,82 @@ class EmailScrapper():
             self.parse_email(found_email=email_coll)
             sys.exit(0)
 
-    def run(self, domain, limit):
+    def run(self, args):
 
-        base_domain = urlparse(domain).netloc
-        
-        scrapped_emails = set()
-        scrapped_links = deque()
-        visited_site = deque()
+        # Test site: https://n1xa-cli.github.io/website-mail/
+        try:
+            self.intro()
 
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0"
-        })
+            domain = args.get("domain")
+            limit = args.get("limit")
+            file = args.get("filename")
+            threads = args.get("threads")
 
-        self.scrap(domain)
-        visited_site.append(domain)
+            base_domain = urlparse(domain).netloc
 
-        while scrapped_links and len(visited_site) < limit:
-            current_link = scrapped_links.pop()
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+            })
 
-            if self.is_visited(current_link):
-                continue
+            self.left_links.append(domain)
 
-            visited_site.append(current_link)
-            self.scrap(session, base_domain, scrapped_emails, scrapped_links, current_link)
+            t = threading.Thread()
 
-        print(f"\n[+] Scrapped {len(visited_site)} site")
-        self.parse_email(found_email=scrapped_emails)
+            while self.left_links and len(self.visited_site) < limit:
+                batch = []
+                
+                for _ in range(threads):
+                    if not self.left_links or len(self.visited_site) >= limit:
+                        break
+
+                    if not self.left_links:
+                        break
+
+                    current_link = self.left_links.popleft()
+
+                    if self.is_visited(current_link):
+                        continue
+
+                    self.visited_site.add(current_link)
+
+                    t = threading.Thread(target=self.scrap, args=(session, base_domain, self.scrapped_emails, current_link))
+                    t.start()
+                    batch.append(t)
+
+                for t in batch:
+                    t.join()
+            
+            print(colored(f"\n[+] Scrapped {len(self.visited_site)} site", 'green'))
+            
+            if file:
+                self.write_to(file, self.scrapped_emails)
+
+            self.parse_email(found_email=self.scrapped_emails)
+
+        except KeyboardInterrupt:
+            print(colored("\n[+] Detected Ctrl + C... Stopping...", 'red'))
+
 
 if __name__ == "__main__":
-    praser = argparse.ArgumentParser(description="An Email Scrapper", )
-    praser.add_argument("-d", "--domain", type=str, required=True, help="Specify the domain to scrap.")
-    praser.add_argument("-l", "--limit", type=int, required=False, default=20, help="Specify the urls to scrap from(default is 20).")
+    praser = argparse.ArgumentParser(description="An Email Scrapper.", )
+    praser.add_argument("-d", "--domain", type=str, required=True, metavar="", help="Specify the domain to scrap.")
+    praser.add_argument("-l", "--limit", type=int, required=False, default=20, metavar="", help="Specify the urls to scrap from(default is 20).")
+    praser.add_argument("-w", "--write", type=str, required=False, default=None, metavar="", help="Write the emails to.")
+    praser.add_argument("-t", "--thread", type=int,required=False, default=5, metavar="", help="Specify threads(default: 5).")
     args = praser.parse_args()
 
     if not args:
         praser.print_help()
 
+    arguments = {
+        "domain": args.domain,
+        "limit": args.limit,
+        "filename": args.write,
+        "threads": args.thread
+    }
+        
     scrapper = EmailScrapper()
-    scrapper.run(args.domain, args.limit)
+    scrapper.run(arguments)
 
     
