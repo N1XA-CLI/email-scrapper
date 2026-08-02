@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import time
 from bs4 import BeautifulSoup
 import requests
 import re
@@ -133,6 +134,8 @@ class EmailScrapper():
 
             t = threading.Thread()
 
+            start_time = time.perf_counter()
+
             while self.left_links and len(self.visited_site) < limit:
                 batch = []
                 
@@ -159,13 +162,21 @@ class EmailScrapper():
             
             print(colored(f"\n[+] Scrapped {len(self.visited_site)} site", 'green'))
             
+            
             if file:
                 self.write_to(file, self.scrapped_emails)
+
+            end_time = time.perf_counter()
+            print(colored(f"[+] Took {end_time - start_time:.3f} seconds", 'green'))
 
             self.print_emails(found_email=self.scrapped_emails)
 
         except KeyboardInterrupt:
             print(colored("\n[+] Detected Ctrl + C... Stopping...", 'red'))
+
+        
+        
+        
 
 
 if __name__ == "__main__":
