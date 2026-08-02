@@ -14,11 +14,13 @@ class EmailScrapper():
 
     def __init__(self):
         
-        self.left_links = deque() # Store, extracted links and links left to scrap
-        self.scrapped_emails = set() # Stores extracted email
-        self.visited_site = set() # Stores scrapped site 
+        self.left_links = deque() # To store, extracted links and links left to scrap
+        self.scrapped_emails = set() # To store extracted email
+        self.visited_site = set() # To store scrapped site 
 
-    def intro(self):
+    def intro(self) -> str:
+        """Returns Red logo."""
+
         logo = """
 ▓█████  ███▄ ▄███▓ ▄▄▄       ██▓ ██▓         ██████  ▄████▄   ██▀███   ▄▄▄       ██▓███   ██▓███  ▓█████  ██▀███  
 ▓█   ▀ ▓██▒▀█▀ ██▒▒████▄    ▓██▒▓██▒       ▒██    ▒ ▒██▀ ▀█  ▓██ ▒ ██▒▒████▄    ▓██░  ██▒▓██░  ██▒▓█   ▀ ▓██ ▒ ██▒
@@ -32,41 +34,35 @@ class EmailScrapper():
                                                     ░         ~ N1XA-CLI
                                                     """
         
-        print(colored(logo, 'red'))
+        return colored(logo, 'red')
         
 
-    def is_visited(self, url) -> bool:
+    def is_visited(self, url:str) -> bool:
         """Returns True if url is already visited else returns False."""
 
         return url in self.visited_site
     
-    def ext_emails(self, data):
-        """Takes data as text and returns list of emails."""
+    def ext_emails(self, data:str) -> list:
+        """Takes data as text and returns lists of emails."""
 
         return re.findall(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", data)
 
-    def parse_email(self, found_email):
-
-        if not found_email:
-            print(colored("[-] No Email Found", 'red'))
-            print(colored("[-] Exiting...", 'red'))
-            sys.exit(0)
+    def print_emails(self, found_email:list) -> None:
         
-        print(colored(f"[+] Found {len(found_email)} Email", 'green'))
+        print(colored(f"[+] Found {len(found_email)} Emails", 'green'))
 
         for email in found_email:
-            print(email)
+            print(colored(email, 'yellow'))
 
-    def write_to(self, filename, emails) -> None:
+    def write_to(self, filename, emails:list) -> None:
 
         print(colored(f"[+] Writing to {filename}", 'yellow'))
 
         with open(filename, "w") as f:
             for email in emails:
                 f.write(f"{email}\n")
-        
 
-    def scrap(self, session, base_domain, email_coll, url) -> None:
+    def scrap(self, session, base_domain, url) -> None:
         """Takes session, basedomain, a set of email and link"""
 
         try:
@@ -104,7 +100,7 @@ class EmailScrapper():
 
                         self.left_links.append(cleaned_url)
 
-            email_coll.update(self.ext_emails(r.text))
+            self.scrapped_emails.update(self.ext_emails(r.text))
 
         except requests.RequestException as e:
             print("\r\033[K", end="", flush=True)
@@ -112,14 +108,14 @@ class EmailScrapper():
             return
         
         except KeyboardInterrupt:
-            self.parse_email(found_email=email_coll)
+            self.print_emails(found_email=self.scrapped_emails)
             sys.exit(0)
 
     def run(self, args):
 
         # Test site: https://n1xa-cli.github.io/website-mail/
         try:
-            self.intro()
+            print(self.intro())
 
             domain = args.get("domain")
             limit = args.get("limit")
@@ -154,7 +150,7 @@ class EmailScrapper():
 
                     self.visited_site.add(current_link)
 
-                    t = threading.Thread(target=self.scrap, args=(session, base_domain, self.scrapped_emails, current_link))
+                    t = threading.Thread(target=self.scrap, args=(session, base_domain, current_link))
                     t.start()
                     batch.append(t)
 
@@ -166,7 +162,7 @@ class EmailScrapper():
             if file:
                 self.write_to(file, self.scrapped_emails)
 
-            self.parse_email(found_email=self.scrapped_emails)
+            self.print_emails(found_email=self.scrapped_emails)
 
         except KeyboardInterrupt:
             print(colored("\n[+] Detected Ctrl + C... Stopping...", 'red'))
